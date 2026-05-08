@@ -55,7 +55,7 @@ def generate_response(
         f"{api_base.rstrip('/')}/chat/completions",
         headers=headers,
         json=payload,
-        timeout=600,
+        timeout=3600,
     )
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
