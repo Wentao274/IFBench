@@ -8,9 +8,21 @@ CurDate=`date +'%Y%m%d'`
 
 export NLTK_DATA=${ROOT_PATH}/nltk_data
 
-API_BASE="${1:-http://127.0.0.1:8080/v1}"
-API_KEY="${2:-abc123}"
-MODEL="${3:-glm-5}"
+API_BASE="http://127.0.0.1:8080/v1"
+API_KEY="abc123"
+MODEL="minimax-m2.5"
+
+if [ ${#1} -gt 0 ]; then
+    API_BASE="$1"
+fi
+
+if [ ${#2} -gt 0 ]; then
+    API_KEY="$2"
+fi
+
+if [ ${#3} -gt 0 ]; then
+    MODEL="$3"
+fi
 
 cat > .env << EOF
 api_base=$API_BASE
