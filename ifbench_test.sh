@@ -4,25 +4,21 @@ ROOT_PATH=$(cd `dirname $0`; pwd)
 echo $ROOT_PATH
 cd ${ROOT_PATH}
 
-CurDate=`date +'%Y%m%d'`
+CurDate=$(date +'%Y%m%d%H%M%S')
 
 export NLTK_DATA=${ROOT_PATH}/nltk_data
 
-API_BASE="http://127.0.0.1:8080/v1"
-API_KEY="abc123"
-MODEL="minimax-m2.5"
-
-if [ ${#1} -gt 0 ]; then
+if [ ${#1} -gt 0 ] && [ ${#2} -gt 0 ] && [ ${#3} -gt 0 ] && [ ${#4} -gt 0 ]; then
     API_BASE="$1"
-fi
-
-if [ ${#2} -gt 0 ]; then
     API_KEY="$2"
+    MODEL="$3"
+    CHIP="$4"
+else
+    echo "Usage: $0 <api_base> <api_key> <model> <chip>"
+    exit 1
 fi
 
-if [ ${#3} -gt 0 ]; then
-    MODEL="$3"
-fi
+rm -f .env
 
 cat > .env << EOF
 api_base=$API_BASE
@@ -34,8 +30,8 @@ top_k=40
 max_tokens=8192
 seed=42
 input_file=data/IFBench_test.jsonl
-output_file=data/${MODEL}-responses.jsonl
-workers=32
+output_file=data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-responses.jsonl
+workers=8
 EOF
 
 # 2. 生成模型响应
@@ -45,11 +41,11 @@ python3 generate_responses.py
 #uv run python generate_responses.py --limit 5
 
 # 3. Thinking 模型后处理（重要！）
-python3 postprocess_thinking.py data/${MODEL}-responses.jsonl -o data/${MODEL}-clean.jsonl
+python3 postprocess_thinking.py data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-responses.jsonl -o data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-clean.jsonl
 
 # 4. 运行评估
+mkdir -p output/${CHIP}/${MODEL}/${CurDate}
 python3 -m run_eval \
-	--input_data=data/IFBench_test.jsonl \
-	--input_response_data=data/${MODEL}-clean.jsonl \
-	--output_dir=eval
-
+        --input_data=data/IFBench_test.jsonl \
+        --input_response_data=data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-clean.jsonl \
+        --output_dir=eval
