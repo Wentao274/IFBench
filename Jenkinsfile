@@ -43,6 +43,8 @@ fi
 cd ${params.WORK_DIR}
 source .venv/bin/activate
 echo "=== 激活虚拟环境完成 ==="
+#export https_proxy=http://100.64.1.68:1080
+#export http_proxy=http://100.64.1.68:1080
 #uv pip install .
 #uv pip install -r requirements.txt
 #unset https_proxy

@@ -37,7 +37,7 @@ EOF
 mkdir -p data/${CHIP}/${MODEL}/${CurDate}
 
 # 2. 生成模型响应
-python3 generate_responses.py
+uv run python3 generate_responses.py
 
 # 快速测试
 #uv run python generate_responses.py --limit 5
