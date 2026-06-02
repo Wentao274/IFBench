@@ -34,6 +34,8 @@ output_file=data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-responses.jsonl
 workers=8
 EOF
 
+mkdir -p data/${CHIP}/${MODEL}/${CurDate}
+
 # 2. 生成模型响应
 python3 generate_responses.py
 
@@ -41,11 +43,12 @@ python3 generate_responses.py
 #uv run python generate_responses.py --limit 5
 
 # 3. Thinking 模型后处理（重要！）
-python3 postprocess_thinking.py data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-responses.jsonl -o data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-clean.jsonl
+uv run python3 postprocess_thinking.py data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-responses.jsonl -o data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-clean.jsonl
 
 # 4. 运行评估
-mkdir -p output/${CHIP}/${MODEL}/${CurDate}
-python3 -m run_eval \
+# mkdir -p output/${CHIP}/${MODEL}/${CurDate}
+mkdir -p eval/${CHIP}/${MODEL}/${CurDate}
+uv run python3 -m run_eval \
         --input_data=data/IFBench_test.jsonl \
         --input_response_data=data/${CHIP}/${MODEL}/${CurDate}/${MODEL}-clean.jsonl \
-        --output_dir=eval
+        --output_dir=eval/${CHIP}/${MODEL}/${CurDate}

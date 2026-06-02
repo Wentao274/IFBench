@@ -1,11 +1,14 @@
 pipeline {
     agent any
     parameters {
+        string(name: 'TESTER', description: '测试人员名称 (必填)')
+        choice(name: 'INFRA', choices: ['vllm', 'sglang'], description: '推理框架')
+        choice(name: 'PD', choices: ['agg', 'disagg'], description: 'PD分离模式,agg 表示非 PD 分离, disagg 表示 PD 分离')
         string(name: 'CHIP', defaultValue: 'nvidia-h100', description: '芯片平台名称')
-        string(name: 'MODEL', defaultValue: 'glm-5', description: '模型名称')
+        string(name: 'MODEL', defaultValue: 'kimi-k2.5', description: '模型名称')
         string(name: 'BASE_URL', defaultValue: 'http://10.201.149.10:8080/v1', description: 'API 地址')
         text(name: 'RECIPIENTS', defaultValue: 'liwt@zetyun.com', description: '邮件接收者（逗号分隔）')
-        string(name: 'WORK_DIR', defaultValue: '/root/liwt/maas-image/IFBench', description: '远程工作目录')
+        string(name: 'WORK_DIR', defaultValue: '/dingofs/data1/userdata/liwt/maas-image/IFBench', description: '远程工作目录')
     }
     environment {
         SSH_CREDENTIALS = 'HOST_SSH_KEY'
@@ -13,7 +16,7 @@ pipeline {
         REMOTE_HOST = '10.201.132.50'
         REMOTE_USER = 'root'
     }
-    
+
     stages {
         stage('环境检查') {
             steps {
@@ -24,12 +27,33 @@ set -e
 cd ${params.WORK_DIR}
 echo "工作目录: \$(pwd)"
 ls -la
+
+echo "=== 设置权限 ==="
+chmod -R 755 ./*
+if [ ! -d "${params.WORK_DIR}/.venv" ]; then
+    export https_proxy=http://100.64.1.68:1080
+    export http_proxy=http://100.64.1.68:1080
+    echo "创建虚拟环境..."
+    cd ${params.WORK_DIR}
+    uv sync --frozen
+    unset https_proxy
+    unset http_proxy
+fi
+
+cd ${params.WORK_DIR}
+source .venv/bin/activate
+echo "=== 激活虚拟环境完成 ==="
+#uv pip install .
+#uv pip install -r requirements.txt
+#unset https_proxy
+#unset http_proxy
+#echo "=== 安装依赖完成 ==="
 ENDSSH
 """
                 }
             }
         }
-        
+
         stage('运行IFBench测试') {
             steps {
                 script {
@@ -45,9 +69,12 @@ echo "BASE_URL: ${params.BASE_URL}"
 echo "MODEL: ${params.MODEL}"
 echo "CHIP: ${params.CHIP}"
 echo "BUILD_NUMBER: ${BUILD_NUMBER}"
-mkdir -p output/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}
+echo "=== 创建测试输出目录 ==="
+mkdir -p output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}
 chmod +x ifbench_test.sh
-./ifbench_test.sh "${params.BASE_URL}" "${API_KEY}" "${params.MODEL}" "${params.CHIP}" > output/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}/ifb_results.log 2>&1
+echo "=== 执行测试脚本 ==="
+./ifbench_test.sh "${params.BASE_URL}" "${API_KEY}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}/ifb_results.log 2>&1
+echo "=== 测试脚本执行结束 ==="
 ENDSSH
 """
                             }
@@ -56,13 +83,13 @@ ENDSSH
                 }
             }
         }
-        
+
         stage('拉取测试结果') {
             steps {
                 sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         script {
-                            def targetDir = "output/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}"
+                            def targetDir = "output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}"
                             env.RESULT_DIR = targetDir
                             echo "拉取测试结果目录: ${targetDir}"
                             sh """
@@ -81,7 +108,7 @@ find reports/${BUILD_NUMBER}/ -type f
                 }
             }
         }
-        
+
         stage('发送邮件') {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
@@ -89,14 +116,29 @@ find reports/${BUILD_NUMBER}/ -type f
                         def logContent = ""
                         def logFile = ""
                         if (env.RESULT_DIR) {
-                            logFile = "reports/${BUILD_NUMBER}/${env.RESULT_DIR}/ifb_results.log"
+                            logFile = "reports/${BUILD_NUMBER}/${params.MODEL}/ifb_results.log"
                             logContent = fileExists(logFile) ? readFile(logFile) : ""
                         }
                         def prompts = extractValue(logContent, /Loaded (\d+) prompts/, 1) ?: "N/A"
                         def errors = extractValue(logContent, /Errors: (\d+)/, 1) ?: "0"
                         def changed = extractValue(logContent, /Changed (\d+) responses/, 1) ?: "0"
-                        def accuracyStrict = extractValue(logContent, /eval_results_strict[\\s\\S]*?Accuracy: ([\\d.]+)/, 1) ?: "N/A"
-                        def accuracyLoose = extractValue(logContent, /eval_results_loose[\\s\\S]*?Accuracy: ([\\d.]+)/, 1) ?: "N/A"
+                        def lines = logContent.split('\n')
+                        def accuracyStrict = "N/A"
+                        def accuracyLoose = "N/A"
+                        for (int i = 0; i < lines.size(); i++) {
+                            if (lines[i].contains('Generating eval_results_strict') && i + 1 < lines.size()) {
+                                def match = lines[i + 1] =~ /Accuracy: ([\d.]+)/
+                                if (match.find()) {
+                                    accuracyStrict = match.group(1)
+                                }
+                            }
+                            if (lines[i].contains('Generating eval_results_loose') && i + 1 < lines.size()) {
+                                def match = lines[i + 1] =~ /Accuracy: ([\d.]+)/
+                                if (match.find()) {
+                                    accuracyLoose = match.group(1)
+                                }
+                            }
+                        }
                         def api = extractValue(logContent, /API: (.+)/, 1) ?: params.BASE_URL
                         def topP = extractValue(logContent, /TOP_P: ([\d.]+)/, 1) ?: "N/A"
                         def topK = extractValue(logContent, /TOP_K: (\d+)/, 1) ?: "N/A"
@@ -149,16 +191,19 @@ find reports/${BUILD_NUMBER}/ -type f
             <h3>测试概要</h3>
             <table>
                 <tr><th>构建编号</th><td>#${BUILD_NUMBER}</td></tr>
+                <tr><th>测试人员</th><td>${params.TESTER}</td></tr>
                 <tr><th>芯片平台</th><td>${params.CHIP}</td></tr>
                 <tr><th>模型名称</th><td>${params.MODEL}</td></tr>
+                <tr><th>推理框架</th><td>${params.INFRA}</td></tr>
+                <tr><th>PD分离模式</th><td>${params.PD}</td></tr>
                 <tr><th>执行时间</th><td>${currentBuild.durationString}</td></tr>
                 <tr><th>测试状态</th><td>${resultStatus}</td></tr>
                 <tr><th>构建状态</th><td>${currentBuild.currentResult}</td></tr>
             </table>
-            
+
             <h3>测试结果</h3>
             ${htmlTable}
-            
+
             <p style="margin-top: 20px;">详细日志请查看附件。</p>
             <p>Jenkins 构建地址: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
         </div>
