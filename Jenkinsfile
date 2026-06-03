@@ -75,7 +75,7 @@ echo "=== 创建测试输出目录 ==="
 mkdir -p output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}
 chmod +x ifbench_test.sh
 echo "=== 执行测试脚本 ==="
-./ifbench_test.sh "${params.BASE_URL}" "${API_KEY}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}/ifb_results.log 2>&1
+./ifbench_test.sh "${params.BASE_URL}" "${API_KEY}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}/ifb_results_build${BUILD_NUMBER}.log 2>&1
 echo "=== 测试脚本执行结束 ==="
 ENDSSH
 """
@@ -104,6 +104,8 @@ scp -o StrictHostKeyChecking=no \
     ./reports/${BUILD_NUMBER}/ 2>/dev/null || true
 echo "=== 拉取结果 ==="
 find reports/${BUILD_NUMBER}/ -type f
+echo "=== 转换日志为UTF-8 ==="
+find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec sh -c 'iconv -f UTF-8 -t UTF-8 "\$1" > "\$1.utf8" 2>/dev/null && mv "\$1.utf8" "\$1" || rm -f "\$1.utf8"' _ {} \\;
 """
                         }
                     }
@@ -118,7 +120,7 @@ find reports/${BUILD_NUMBER}/ -type f
                         def logContent = ""
                         def logFile = ""
                         if (env.RESULT_DIR) {
-                            logFile = "reports/${BUILD_NUMBER}/${params.MODEL}/ifb_results.log"
+                            logFile = "reports/${BUILD_NUMBER}/${params.MODEL}/ifb_results_build${BUILD_NUMBER}.log"
                             logContent = fileExists(logFile) ? readFile(logFile) : ""
                         }
                         def prompts = extractValue(logContent, /Loaded (\d+) prompts/, 1) ?: "N/A"
@@ -225,7 +227,8 @@ find reports/${BUILD_NUMBER}/ -type f
                             subject: "[模型推理 - IFBench精度测试报告] #${BUILD_NUMBER} ${params.CHIP} - ${params.MODEL}",
                             body: emailBody,
                             to: "${params.RECIPIENTS}",
-                            mimeType: 'text/html'
+                            mimeType: 'text/html',
+                            attachmentsPattern: "reports/${BUILD_NUMBER}/**/ifb_results_build${BUILD_NUMBER}.log"
                         )
                     }
                 }
