@@ -59,7 +59,8 @@ ENDSSH
         stage('运行IFBench测试') {
             steps {
                 script {
-                    if (!params.API_KEY || params.API_KEY.trim() == '') {
+                    def apiKey = params.API_KEY ? params.API_KEY.toString().trim() : ''
+                    if (!apiKey) {
                         error("API_KEY 参数不能为空，请输入 API Key 后重新构建")
                     }
                     def safeModelName = params.MODEL.contains('/') ? params.MODEL.tokenize('/').last() : params.MODEL
@@ -79,7 +80,7 @@ echo "=== 创建测试输出目录 ==="
 mkdir -p output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}
 chmod +x ifbench_test.sh
 echo "=== 执行测试脚本 ==="
-./ifbench_test.sh "${params.BASE_URL}" "${params.API_KEY}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}/ifb_results_build${BUILD_NUMBER}.log 2>&1
+./ifbench_test.sh "${params.BASE_URL}" "${apiKey}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}/ifb_results_build${BUILD_NUMBER}.log 2>&1
 echo "=== 测试脚本执行结束 ==="
 ENDSSH
 """
