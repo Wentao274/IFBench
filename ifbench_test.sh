@@ -18,6 +18,10 @@ else
     exit 1
 fi
 
+if [[ "$MODEL" == *"/"* ]]; then
+    MODEL=$(echo "$MODEL" | awk -F'/' '{print $NF}')
+fi
+
 rm -f .env
 
 cat > .env << EOF

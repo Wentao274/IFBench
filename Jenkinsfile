@@ -7,12 +7,12 @@ pipeline {
         string(name: 'CHIP', defaultValue: 'nvidia-h100', description: '芯片平台名称')
         string(name: 'MODEL', defaultValue: 'kimi-k2.5', description: '模型名称')
         string(name: 'BASE_URL', defaultValue: 'http://10.201.149.10:8080/v1', description: 'API 地址')
+        password(name: 'API_KEY', defaultValue: '', description: 'API Key (必填)')
         text(name: 'RECIPIENTS', defaultValue: 'liwt@zetyun.com', description: '邮件接收者（逗号分隔）')
         string(name: 'WORK_DIR', defaultValue: '/dingofs/data1/userdata/liwt/maas-image/IFBench', description: '远程工作目录')
     }
     environment {
         SSH_CREDENTIALS = 'HOST_SSH_KEY'
-        API_KEY_CREDENTIALS = 'API_KEY'
         REMOTE_HOST = '10.201.132.50'
         REMOTE_USER = 'root'
     }
@@ -59,10 +59,14 @@ ENDSSH
         stage('运行IFBench测试') {
             steps {
                 script {
-                    withCredentials([string(credentialsId: "${API_KEY_CREDENTIALS}", variable: 'API_KEY')]) {
-                        sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
-                            catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                                sh """
+                    if (!params.API_KEY || params.API_KEY.trim() == '') {
+                        error("API_KEY 参数不能为空，请输入 API Key 后重新构建")
+                    }
+                    def safeModelName = params.MODEL.contains('/') ? params.MODEL.tokenize('/').last() : params.MODEL
+                    env.SAFE_MODEL_NAME = safeModelName
+                    sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh """
 ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << ENDSSH
 set -e
 cd ${params.WORK_DIR}
@@ -72,14 +76,13 @@ echo "MODEL: ${params.MODEL}"
 echo "CHIP: ${params.CHIP}"
 echo "BUILD_NUMBER: ${BUILD_NUMBER}"
 echo "=== 创建测试输出目录 ==="
-mkdir -p output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}
+mkdir -p output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}
 chmod +x ifbench_test.sh
 echo "=== 执行测试脚本 ==="
-./ifbench_test.sh "${params.BASE_URL}" "${API_KEY}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}/ifb_results_build${BUILD_NUMBER}.log 2>&1
+./ifbench_test.sh "${params.BASE_URL}" "${params.API_KEY}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}/ifb_results_build${BUILD_NUMBER}.log 2>&1
 echo "=== 测试脚本执行结束 ==="
 ENDSSH
 """
-                            }
                         }
                     }
                 }
@@ -91,7 +94,7 @@ ENDSSH
                 sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         script {
-                            def targetDir = "output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${params.MODEL}"
+                            def targetDir = "output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}"
                             env.RESULT_DIR = targetDir
                             echo "拉取测试结果目录: ${targetDir}"
                             sh """
@@ -120,7 +123,7 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
                         def logContent = ""
                         def logFile = ""
                         if (env.RESULT_DIR) {
-                            logFile = "reports/${BUILD_NUMBER}/${params.MODEL}/ifb_results_build${BUILD_NUMBER}.log"
+                            logFile = "reports/${BUILD_NUMBER}/${SAFE_MODEL_NAME}/ifb_results_build${BUILD_NUMBER}.log"
                             logContent = fileExists(logFile) ? readFile(logFile) : ""
                         }
                         def prompts = extractValue(logContent, /Loaded (\d+) prompts/, 1) ?: "N/A"
