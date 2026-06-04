@@ -5,11 +5,11 @@ pipeline {
         choice(name: 'INFRA', choices: ['vllm', 'sglang'], description: '推理框架')
         choice(name: 'PD', choices: ['agg', 'disagg'], description: 'PD分离模式,agg 表示非 PD 分离, disagg 表示 PD 分离')
         string(name: 'CHIP', defaultValue: 'nvidia-h100', description: '芯片平台名称')
-        string(name: 'MODEL', defaultValue: 'kimi-k2.5', description: '模型名称')
+        string(name: 'MODEL', defaultValue: 'kimi-k2.5', description: '模型服务名称（served-model-name）')
         string(name: 'BASE_URL', defaultValue: 'http://10.201.149.10:8080/v1', description: 'API 地址')
-        password(name: 'API_KEY', defaultValue: '', description: 'API Key (必填)')
+        password(name: 'API_KEY', defaultValue: '', description: 'API Key (默认为空，如果服务端未设置API认证则保持默认即可)')
         text(name: 'RECIPIENTS', defaultValue: 'liwt@zetyun.com', description: '邮件接收者（逗号分隔）')
-        string(name: 'WORK_DIR', defaultValue: '/dingofs/data1/userdata/liwt/maas-image/IFBench', description: '远程工作目录')
+        string(name: 'WORK_DIR', defaultValue: '/dingofs/data1/userdata/liwt/maas-image/IFBench', description: '测试仓库目录，请不要改动')
     }
     environment {
         SSH_CREDENTIALS = 'HOST_SSH_KEY'
@@ -60,9 +60,6 @@ ENDSSH
             steps {
                 script {
                     def apiKey = params.API_KEY ? params.API_KEY.toString().trim() : ''
-                    if (!apiKey) {
-                        error("API_KEY 参数不能为空，请输入 API Key 后重新构建")
-                    }
                     def safeModelName = params.MODEL.contains('/') ? params.MODEL.tokenize('/').last() : params.MODEL
                     env.SAFE_MODEL_NAME = safeModelName
                     sshagent(credentials: ["${SSH_CREDENTIALS}"]) {

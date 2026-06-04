@@ -8,9 +8,9 @@ CurDate=$(date +'%Y%m%d%H%M%S')
 
 export NLTK_DATA=${ROOT_PATH}/nltk_data
 
-if [ ${#1} -gt 0 ] && [ ${#2} -gt 0 ] && [ ${#3} -gt 0 ] && [ ${#4} -gt 0 ]; then
+if [ ${#1} -gt 0 ] && [ ${#3} -gt 0 ] && [ ${#4} -gt 0 ]; then
     API_BASE="$1"
-    API_KEY="$2"
+    API_KEY="${2:-}"
     MODEL="$3"
     CHIP="$4"
 else
