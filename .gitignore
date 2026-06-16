@@ -14,3 +14,6 @@ __pycache__/
 # Response files with secrets in name
 data/*responses*.jsonl
 data/*clean*.jsonl
+
+# Test results
+output/

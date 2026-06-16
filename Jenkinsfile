@@ -153,16 +153,15 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
                         def htmlTable = """
                         <table border="1" style="border-collapse: collapse; width: 100%;">
                             <tr style="background-color: #e3f2fd;"><th>Metric</th><th>Value</th></tr>
-                            <tr><td>构建编号</td><td>${BUILD_NUMBER}</td></tr>
-                            <tr><td>请求数</td><td>${prompts}</td></tr>
                             <tr><td>测试模型</td><td>${params.MODEL}</td></tr>
                             <tr><td>模型URL</td><td>${api}</td></tr>
+                            <tr><td>请求数</td><td>${prompts}</td></tr>
                             <tr><td><b>测试参数</b></td><td>
-                                <b>TOP_P: ${topP}</b><br>
-                                <b>TOP_K: ${topK}</b><br>
-                                <b>Temperature: ${temperature}</b><br>
-                                <b>Max Tokens: ${maxTokens}</b><br>
-                                <b>Workers: ${workers}</b>
+                                TOP_P: ${topP}<br>
+                                TOP_K: ${topK}<br>
+                                Temperature: ${temperature}<br>
+                                Max Tokens: ${maxTokens}<br>
+                                Workers: ${workers}
                             </td></tr>
                             <tr><td>Errors</td><td>${errors}</td></tr>
                             <tr><td>Changed</td><td>${changed}</td></tr>
@@ -195,11 +194,12 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
         <div class="content">
             <h3>测试概要</h3>
             <table>
+                <tr><th>项目</th><td>值</td></tr>
                 <tr><th>构建编号</th><td>#${BUILD_NUMBER}</td></tr>
                 <tr><th>测试人员</th><td>${params.TESTER}</td></tr>
                 <tr><th>芯片平台</th><td>${params.CHIP}</td></tr>
-                <tr><th>模型名称</th><td>${params.MODEL}</td></tr>
                 <tr><th>推理框架</th><td>${params.INFRA}</td></tr>
+                <tr><th>模型名称</th><td>${params.MODEL}</td></tr>
                 <tr><th>PD分离模式</th><td>${params.PD}</td></tr>
                 <tr><th>执行时间</th><td>${currentBuild.durationString}</td></tr>
                 <tr><th>测试状态</th><td>${resultStatus}</td></tr>
