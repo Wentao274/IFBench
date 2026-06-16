@@ -29,7 +29,7 @@ echo "工作目录: \$(pwd)"
 ls -la
 
 echo "=== 设置权限 ==="
-chmod -R 755 ./*
+chmod +x ifbench_test.sh
 if [ ! -d "${params.WORK_DIR}/.venv" ]; then
     export https_proxy=http://100.64.1.68:1080
     export http_proxy=http://100.64.1.68:1080
