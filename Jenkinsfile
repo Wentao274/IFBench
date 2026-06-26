@@ -1,7 +1,7 @@
 pipeline {
     agent any
     parameters {
-        string(name: 'TESTER', description: '测试人员名称 (必填)')
+        string(name: 'TESTER', defaultValue: 'liwt', description: '测试人员名称 (必填)')
         choice(name: 'INFRA', choices: ['vllm', 'sglang'], description: '推理框架')
         choice(name: 'PD', choices: ['agg', 'disagg'], description: 'PD分离模式,agg 表示非 PD 分离, disagg 表示 PD 分离')
         string(name: 'CHIP', defaultValue: 'nvidia-h100', description: '芯片平台名称')
@@ -18,7 +18,63 @@ pipeline {
     }
 
     stages {
+        stage('API 连通性预检') {
+            steps {
+                sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
+                    script {
+                        def safeModelName = params.MODEL.contains('/') ? params.MODEL.tokenize('/').last() : params.MODEL
+                        if (!safeModelName) {
+                            safeModelName = 'unknown'
+                        }
+                        env.SAFE_MODEL_NAME = safeModelName
+
+                        def apiKey = params.API_KEY ? params.API_KEY.toString().trim() : ''
+                        def authHeaderLine = apiKey ?
+                            "-H \"Authorization: Bearer ${apiKey}\" \\" :
+                            ''
+                        try {
+                            sh """
+ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << 'ENDSSH'
+set -o pipefail
+{
+    echo "=== 检查 API 连通性 (/models) ==="
+    HTTP_CODE=\$(curl -s --connect-timeout 10 -m 30 -o /dev/null -w "%{http_code}" ${params.BASE_URL}/models)
+    if [ "\${HTTP_CODE}" != "200" ]; then
+        echo "ERROR: API 连通性检查失败, HTTP状态码: \${HTTP_CODE}, URL: ${params.BASE_URL}/models"
+        exit 1
+    fi
+    echo "API /models 连通性检查通过, HTTP状态码: \${HTTP_CODE}"
+
+    echo "=== 检查 Chat Completions 接口 ==="
+    CHAT_RESP=\$(curl -s --connect-timeout 10 -m 60 -w "\\n%{http_code}" \\
+        ${authHeaderLine}
+        -H "Content-Type: application/json" \\
+        -d '{"model":"${params.MODEL}","messages":[{"role":"user","content":"hello"}],"max_tokens":10}' \\
+        ${params.BASE_URL}/chat/completions)
+    CHAT_HTTP_CODE=\$(echo "\${CHAT_RESP}" | tail -1)
+    if [ "\${CHAT_HTTP_CODE}" != "200" ]; then
+        echo "ERROR: Chat Completions 接口检查失败, HTTP状态码: \${CHAT_HTTP_CODE}"
+        echo "响应内容: \$(echo "\${CHAT_RESP}" | head -n -1)"
+        exit 1
+    fi
+    echo "Chat Completions 接口检查通过, HTTP状态码: \${CHAT_HTTP_CODE}"
+} 2>&1 | tee /tmp/connectivity_${BUILD_NUMBER}.log
+ENDSSH
+"""
+                        } catch (Exception e) {
+                            env.CONNECTIVITY_FAILED = 'true'
+                            currentBuild.result = 'UNSTABLE'
+                            println("=== API 连通性预检失败,后续阶段(环境检查、运行IFBench测试)将跳过 ===")
+                        }
+                    }
+                }
+            }
+        }
+
         stage('环境检查') {
+            when {
+                expression { env.CONNECTIVITY_FAILED != 'true' }
+            }
             steps {
                 sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
                     sh """
@@ -57,6 +113,9 @@ ENDSSH
         }
 
         stage('运行IFBench测试') {
+            when {
+                expression { env.CONNECTIVITY_FAILED != 'true' }
+            }
             steps {
                 script {
                     def apiKey = params.API_KEY ? params.API_KEY.toString().trim() : ''
@@ -99,10 +158,18 @@ ENDSSH
 mkdir -p reports/${BUILD_NUMBER}
 scp -o StrictHostKeyChecking=no \
     -r ${REMOTE_USER}@${REMOTE_HOST}:${params.WORK_DIR}/${targetDir} \
-    ./reports/${BUILD_NUMBER}/
+    ./reports/${BUILD_NUMBER}/ 2>/dev/null \
+    && echo "测试结果目录已拉取: ${targetDir}" \
+    || echo "WARN: 测试结果目录拉取失败(可能测试阶段未执行,例如连通性检查失败)"
 scp -o StrictHostKeyChecking=no \
     ${REMOTE_USER}@${REMOTE_HOST}:${params.WORK_DIR}/.env \
     ./reports/${BUILD_NUMBER}/ 2>/dev/null || true
+echo "=== 拉取连通性预检日志 ==="
+scp -o StrictHostKeyChecking=no \
+    ${REMOTE_USER}@${REMOTE_HOST}:/tmp/connectivity_${BUILD_NUMBER}.log \
+    ./reports/${BUILD_NUMBER}/connectivity_${BUILD_NUMBER}.log 2>/dev/null \
+    && echo "连通性预检日志已拉取" \
+    || echo "WARN: 连通性预检日志拉取失败(可能未执行预检)"
 echo "=== 拉取结果 ==="
 find reports/${BUILD_NUMBER}/ -type f
 echo "=== 转换日志为UTF-8 ==="
@@ -124,6 +191,33 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
                             logFile = "reports/${BUILD_NUMBER}/${SAFE_MODEL_NAME}/ifb_results_build${BUILD_NUMBER}.log"
                             logContent = fileExists(logFile) ? readFile(logFile) : ""
                         }
+
+                        def connectivityLogFile = "reports/${BUILD_NUMBER}/connectivity_${BUILD_NUMBER}.log"
+                        def connectivityLogContent = fileExists(connectivityLogFile) ? readFile(connectivityLogFile) : ""
+                        def failureReason = ""
+                        def connectivityFailureReason = ""
+                        if (connectivityLogContent.contains("API 连通性检查失败") ||
+                            connectivityLogContent.contains("Chat Completions 接口检查失败")) {
+                            failureReason = "连通性检查未通过"
+                            println("DEBUG: 识别到连通性检查失败, 失败原因: ${failureReason}")
+                            def logLines = connectivityLogContent.split('\n')
+                            def collected = []
+                            def inFailureSection = false
+                            for (def ll : logLines) {
+                                if (ll.contains("检查 API 连通性") || ll.contains("Chat Completions 接口检查")) {
+                                    inFailureSection = true
+                                }
+                                if (inFailureSection) {
+                                    if (!collected.isEmpty() && ll.trim().startsWith("===") &&
+                                        !ll.contains("检查 API 连通性") && !ll.contains("Chat Completions 接口检查")) {
+                                        break
+                                    }
+                                    collected.add(ll)
+                                }
+                            }
+                            connectivityFailureReason = collected.join('\n').trim()
+                        }
+
                         def prompts = extractValue(logContent, /Loaded (\d+) prompts/, 1) ?: "N/A"
                         def errors = extractValue(logContent, /Errors: (\d+)/, 1) ?: "0"
                         def changed = extractValue(logContent, /Changed (\d+) responses/, 1) ?: "0"
@@ -171,14 +265,32 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
                         """
                         def hasResult = fileExists(logFile) && logContent.length() > 0
                         def resultStatus = hasResult ? "成功" : "失败/无结果"
+                        if (failureReason) {
+                            resultStatus = failureReason
+                        }
                         def resultDir = env.RESULT_DIR ?: 'N/A'
+
+                        def connectivityFailureHtml = ""
+                        if (failureReason) {
+                            def escapedReason = connectivityFailureReason
+                                .replace('&', '&amp;')
+                                .replace('<', '&lt;')
+                                .replace('>', '&gt;')
+                            connectivityFailureHtml = """
+    <div style="background-color: #ffebee; color: #000000; border-left: 4px solid #d32f2f; padding: 12px 15px; margin-top: 15px; border-radius: 3px;">
+        <h3 style="color: #d32f2f; margin-top: 0; margin-bottom: 8px;">⚠️ 连通性检查未通过</h3>
+        <p style="margin-top: 0; margin-bottom: 8px; color: #000000;">本次测试未能正常执行用例，原因是 API 连通性检查失败：</p>
+        <pre style="background-color: #ffffff; color: #000000; padding: 10px; border-radius: 3px; overflow-x: auto; white-space: pre-wrap; margin: 0; font-family: Menlo, Consolas, monospace; font-size: 12px;">${escapedReason}</pre>
+    </div>"""
+                        }
+
                         def emailBody = """
 <html>
 <head>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
         .container { max-width: 900px; margin: 0 auto; background-color: #fff; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .header { background-color: ${hasResult ? '#4CAF50' : '#f44336'}; color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+        .header { background-color: ${(!failureReason && hasResult) ? '#4CAF50' : '#f44336'}; color: white; padding: 20px; border-radius: 5px 5px 0 0; }
         .content { padding: 20px; }
         table { border-collapse: collapse; width: 100%; margin-top: 15px; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
@@ -206,6 +318,8 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
                 <tr><th>构建状态</th><td>${currentBuild.currentResult}</td></tr>
             </table>
 
+            ${connectivityFailureHtml}
+
             <h3>测试结果</h3>
             ${htmlTable}
 
@@ -224,12 +338,15 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
                         echo "测试状态: ${resultStatus}"
                         echo "Prompts: ${prompts}, Errors: ${errors}, Changed: ${changed}"
                         echo "Accuracy Strict: ${accuracyStrict}, Accuracy Loose: ${accuracyLoose}"
+                        def attachmentPattern = failureReason ?
+                            "reports/${BUILD_NUMBER}/connectivity_${BUILD_NUMBER}.log" :
+                            "reports/${BUILD_NUMBER}/**/ifb_results_build${BUILD_NUMBER}.log"
                         emailext(
                             subject: "[模型推理 - IFBench精度测试报告] #${BUILD_NUMBER} ${params.CHIP} - ${params.MODEL}",
                             body: emailBody,
                             to: "${params.RECIPIENTS}",
                             mimeType: 'text/html',
-                            attachmentsPattern: "reports/${BUILD_NUMBER}/**/ifb_results_build${BUILD_NUMBER}.log"
+                            attachmentsPattern: attachmentPattern
                         )
                     }
                 }
