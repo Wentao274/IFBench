@@ -91,6 +91,26 @@ cd ${params.WORK_DIR}
 echo "工作目录: \$(pwd)"
 ls -la
 
+echo "=== 清理残留的 ifbench_test 相关进程(防止上一次构建被手动终止后残留) ==="
+set +e
+IFBENCH_PIDS=\$(pgrep -af 'ifbench_test' | grep -v 'pgrep' || true)
+if [ -n "\${IFBENCH_PIDS}" ]; then
+    echo "发现残留的 ifbench_test 相关进程:"
+    echo "\${IFBENCH_PIDS}"
+    pkill -9 -f 'ifbench_test' || true
+    sleep 2
+    REMAINING=\$(pgrep -af 'ifbench_test' | grep -v 'pgrep' || true)
+    if [ -n "\${REMAINING}" ]; then
+        echo "WARN: 仍有残留进程未清理:"
+        echo "\${REMAINING}"
+    else
+        echo "残留进程已清理完成"
+    fi
+else
+    echo "未发现残留的 ifbench_test 进程"
+fi
+set -e
+
 echo "=== 设置权限 ==="
 chmod +x ifbench_test.sh
 if [ ! -d "${params.WORK_DIR}/.venv" ]; then
