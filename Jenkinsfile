@@ -1,14 +1,14 @@
 pipeline {
     agent any
     parameters {
-        string(name: 'TESTER', defaultValue: 'liwt', description: '测试人员名称 (必填)')
-        choice(name: 'INFRA', choices: ['vllm', 'sglang'], description: '推理框架')
-        choice(name: 'PD', choices: ['agg', 'disagg'], description: 'PD分离模式,agg 表示非 PD 分离, disagg 表示 PD 分离')
-        string(name: 'CHIP', defaultValue: 'nvidia-h100', description: '芯片平台名称')
-        string(name: 'MODEL', defaultValue: 'kimi-k2.5', description: '模型服务名称（served-model-name）')
-        string(name: 'BASE_URL', defaultValue: 'http://10.201.149.10:8080/v1', description: 'API 地址（必填，请注意带有/v1后缀）')
-        password(name: 'API_KEY', defaultValue: '', description: 'API Key (默认为空，如果服务端未设置API认证则保持默认即可)')
-        text(name: 'RECIPIENTS', defaultValue: 'liwt@zetyun.com', description: '邮件接收者（逗号分隔）')
+        string(name: 'TESTER', defaultValue: 'liwt', description: '测试人员名称（必填）')
+        string(name: 'CHIP', defaultValue: 'nvidia-h100', description: '芯片平台名称（必填）')
+        choice(name: 'ENGINE', choices: ['vllm', 'sglang'], description: '推理框架（必填）')
+        choice(name: 'PD', choices: ['agg', 'disagg'], description: 'PD分离模式（agg表示非PD分离，disagg表示PD分离）')
+        string(name: 'MODEL', defaultValue: 'kimi-k2.5', description: '模型服务名称 (必填)')
+        string(name: 'BASE_URL', defaultValue: 'http://10.201.149.10:8080', description: 'API 地址（必填）')
+        password(name: 'API_KEY', defaultValue: '', description: 'API Key (可选，无需认证时留空)')
+        text(name: 'RECIPIENTS', defaultValue: 'liwt@zetyun.com', description: '测试报告邮件接收者（逗号分隔）')
         string(name: 'WORK_DIR', defaultValue: '/dingofs/data1/userdata/liwt/maas-image/IFBench', description: '测试仓库目录，请不要改动')
     }
     environment {
@@ -28,29 +28,36 @@ pipeline {
                         }
                         env.SAFE_MODEL_NAME = safeModelName
 
+                        def baseUrl = params.BASE_URL ? params.BASE_URL.toString().trim() : ''
+                        if (baseUrl && !baseUrl.endsWith('/v1')) {
+                            baseUrl = baseUrl + '/v1'
+                        }
+                        env.BASE_URL_WITH_V1 = baseUrl
+
                         def apiKey = params.API_KEY ? params.API_KEY.toString().trim() : ''
-                        def authHeaderLine = apiKey ?
-                            "-H \"Authorization: Bearer ${apiKey}\" \\" :
-                            ''
+                        def headerArgs = ['-H "Content-Type: application/json"']
+                        if (apiKey) {
+                            headerArgs << "-H \"Authorization: Bearer ${apiKey}\""
+                        }
+                        def headerLine = headerArgs.join(" \\\n    ")
                         try {
                             sh """
 ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << 'ENDSSH'
 set -o pipefail
 {
     echo "=== 检查 API 连通性 (/models) ==="
-    HTTP_CODE=\$(curl -s --connect-timeout 10 -m 30 -o /dev/null -w "%{http_code}" ${params.BASE_URL}/models)
+    HTTP_CODE=\$(curl -s --connect-timeout 10 -m 30 -o /dev/null -w "%{http_code}" ${baseUrl}/models)
     if [ "\${HTTP_CODE}" != "200" ]; then
-        echo "ERROR: API 连通性检查失败, HTTP状态码: \${HTTP_CODE}, URL: ${params.BASE_URL}/models"
+        echo "ERROR: API 连通性检查失败, HTTP状态码: \${HTTP_CODE}, URL: ${baseUrl}/models"
         exit 1
     fi
     echo "API /models 连通性检查通过, HTTP状态码: \${HTTP_CODE}"
 
     echo "=== 检查 Chat Completions 接口 ==="
     CHAT_RESP=\$(curl -s --connect-timeout 10 -m 60 -w "\\n%{http_code}" \\
-        ${authHeaderLine}
-        -H "Content-Type: application/json" \\
+        ${headerLine} \\
         -d '{"model":"${params.MODEL}","messages":[{"role":"user","content":"hello"}],"max_tokens":10}' \\
-        ${params.BASE_URL}/chat/completions)
+        ${baseUrl}/chat/completions)
     CHAT_HTTP_CODE=\$(echo "\${CHAT_RESP}" | tail -1)
     if [ "\${CHAT_HTTP_CODE}" != "200" ]; then
         echo "ERROR: Chat Completions 接口检查失败, HTTP状态码: \${CHAT_HTTP_CODE}"
@@ -121,6 +128,11 @@ ENDSSH
                     def apiKey = params.API_KEY ? params.API_KEY.toString().trim() : ''
                     def safeModelName = params.MODEL.contains('/') ? params.MODEL.tokenize('/').last() : params.MODEL
                     env.SAFE_MODEL_NAME = safeModelName
+                    def baseUrl = params.BASE_URL ? params.BASE_URL.toString().trim() : ''
+                    if (baseUrl && !baseUrl.endsWith('/v1')) {
+                        baseUrl = baseUrl + '/v1'
+                    }
+                    env.BASE_URL_WITH_V1 = baseUrl
                     sshagent(credentials: ["${SSH_CREDENTIALS}"]) {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                             sh """
@@ -136,7 +148,7 @@ echo "=== 创建测试输出目录 ==="
 mkdir -p output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}
 chmod +x ifbench_test.sh
 echo "=== 执行测试脚本 ==="
-./ifbench_test.sh "${params.BASE_URL}" "${apiKey}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}/ifb_results_build${BUILD_NUMBER}.log 2>&1
+./ifbench_test.sh "${baseUrl}" "${apiKey}" "${params.MODEL}" "${params.CHIP}" > output/${params.TESTER}/${BUILD_NUMBER}/${params.CHIP}/${SAFE_MODEL_NAME}/ifb_results_build${BUILD_NUMBER}.log 2>&1
 echo "=== 测试脚本执行结束 ==="
 ENDSSH
 """
@@ -310,7 +322,7 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
                 <tr><th>构建编号</th><td>#${BUILD_NUMBER}</td></tr>
                 <tr><th>测试人员</th><td>${params.TESTER}</td></tr>
                 <tr><th>芯片平台</th><td>${params.CHIP}</td></tr>
-                <tr><th>推理框架</th><td>${params.INFRA}</td></tr>
+                <tr><th>推理框架</th><td>${params.ENGINE}</td></tr>
                 <tr><th>模型名称</th><td>${params.MODEL}</td></tr>
                 <tr><th>PD分离模式</th><td>${params.PD}</td></tr>
                 <tr><th>执行时间</th><td>${currentBuild.durationString}</td></tr>
