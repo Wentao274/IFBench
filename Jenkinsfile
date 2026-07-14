@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'slave-3'
+    }
     parameters {
         string(name: 'TESTER', defaultValue: 'liwt', description: '测试人员名称（必填）')
         string(name: 'CHIP', defaultValue: 'nvidia-h100', description: '芯片平台名称（必填）')
@@ -8,6 +10,7 @@ pipeline {
         string(name: 'MODEL', defaultValue: 'kimi-k2.5', description: '模型服务名称 (必填)')
         string(name: 'BASE_URL', defaultValue: 'http://10.201.149.10:8080', description: 'API 地址（必填）')
         password(name: 'API_KEY', defaultValue: '', description: 'API Key (可选，无需认证时留空)')
+        string(name: 'DESCRIPTION', defaultValue: '', description: '模型服务的描述信息')
         text(name: 'RECIPIENTS', defaultValue: 'liwt@zetyun.com', description: '测试报告邮件接收者（逗号分隔）')
         string(name: 'WORK_DIR', defaultValue: '/dingofs/data2/userdata/liwt/maas-image/IFBench', description: '测试仓库目录，请不要改动')
     }
@@ -28,9 +31,10 @@ pipeline {
                     println("芯片平台:     ${params.CHIP}")
                     println("推理框架:     ${params.ENGINE}")
                     println("PD分离模式:   ${params.PD}")
-                    println("模型服务名称: ${params.MODEL}")
-                    println("BASE_URL:     ${params.BASE_URL}")
-                    println("邮件接收者:   ${params.RECIPIENTS}")
+                    println("模型服务名称:  ${params.MODEL}")
+                    println("BASE_URL:    ${params.BASE_URL}")
+                    println("模型描述:     ${params.DESCRIPTION}")
+                    println("邮件接收者:    ${params.RECIPIENTS}")
                     println("工作目录:     ${params.WORK_DIR}")
                     println("构建编号:     #${BUILD_NUMBER}")
                     println("========================================")
@@ -355,6 +359,7 @@ find reports/${BUILD_NUMBER}/ -name 'ifb_results_build${BUILD_NUMBER}.log' -exec
             <table>
                 <tr><th>项目</th><td>值</td></tr>
                 <tr><th>构建编号</th><td>#${BUILD_NUMBER}</td></tr>
+                <tr><th>模型服务描述</th><td>${params.DESCRIPTION}</td></tr>
                 <tr><th>测试人员</th><td>${params.TESTER}</td></tr>
                 <tr><th>芯片平台</th><td>${params.CHIP}</td></tr>
                 <tr><th>推理框架</th><td>${params.ENGINE}</td></tr>
