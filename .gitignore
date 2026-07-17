@@ -2,6 +2,7 @@
 .env
 .venv/
 .nltk_data/
+nul
 
 # Python
 __pycache__/
@@ -14,6 +15,9 @@ __pycache__/
 # Response files with secrets in name
 data/*responses*.jsonl
 data/*clean*.jsonl
+
+# Ruff stuff:
+.ruff_cache/
 
 # Test results
 output/
