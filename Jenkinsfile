@@ -138,8 +138,8 @@ set -e
 echo "=== 设置权限 ==="
 chmod +x ifbench_test.sh
 if [ ! -d "${params.WORK_DIR}/.venv" ]; then
-    export https_proxy=http://100.64.1.68:1080
-    export http_proxy=http://100.64.1.68:1080
+    export https_proxy=http://10.201.136.68:1080
+    export http_proxy=http://10.201.136.68:1080
     echo "创建虚拟环境..."
     cd ${params.WORK_DIR}
     uv sync --frozen
@@ -150,8 +150,8 @@ fi
 cd ${params.WORK_DIR}
 source .venv/bin/activate
 echo "=== 激活虚拟环境完成 ==="
-#export https_proxy=http://100.64.1.68:1080
-#export http_proxy=http://100.64.1.68:1080
+#export https_proxy=http://10.201.136.68:1080
+#export http_proxy=http://10.201.136.68:1080
 #uv pip install .
 #uv pip install -r requirements.txt
 #unset https_proxy
